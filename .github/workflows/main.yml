@@ -1,0 +1,55 @@
+
+name: Build Daftar Taqyim APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'daftar_taqyim_flutter_source.zip'
+      - '.github/workflows/build-apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract ZIP
+        run: |
+          mkdir source
+          unzip -q daftar_taqyim_flutter_source.zip -d source
+
+      - name: Locate Flutter project
+        run: |
+          echo "PROJECT_DIR=source/daftar_taqyim_flutter" >> $GITHUB_ENV
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android files
+        working-directory: source/daftar_taqyim_flutter
+        run: flutter create --platforms=android --org dz.edu.daftar .
+
+      - name: Install dependencies
+        working-directory: source/daftar_taqyim_flutter
+        run: flutter pub get
+
+      - name: Analyze project
+        working-directory: source/daftar_taqyim_flutter
+        run: flutter analyze
+
+      - name: Build APK
+        working-directory: source/daftar_taqyim_flutter
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Daftar-Taqyim-APK
+          path: source/daftar_taqyim_flutter/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
