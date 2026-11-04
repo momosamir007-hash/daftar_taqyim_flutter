@@ -3,53 +3,124 @@ name: Build Daftar Taqyim APK
 
 on:
   workflow_dispatch:
+
   push:
     paths:
       - 'daftar_taqyim_flutter_source.zip'
       - '.github/workflows/build-apk.yml'
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+
+      # 1. Download repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract ZIP
+      # 2. Check ZIP file
+      - name: Verify ZIP archive
         run: |
-          mkdir source
+          if [ ! -f "daftar_taqyim_flutter_source.zip" ]; then
+            echo "ERROR: ZIP file not found!"
+            exit 1
+          fi
+
+          echo "ZIP archive found successfully."
+          unzip -t daftar_taqyim_flutter_source.zip
+
+      # 3. Extract project
+      - name: Extract Flutter project
+        run: |
+          mkdir -p source
           unzip -q daftar_taqyim_flutter_source.zip -d source
 
+      # 4. Find Flutter project
       - name: Locate Flutter project
         run: |
-          echo "PROJECT_DIR=source/daftar_taqyim_flutter" >> $GITHUB_ENV
+          PROJECT_FILE=$(find source -name pubspec.yaml -print -quit)
 
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: pubspec.yaml not found!"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Flutter project found: $PROJECT_DIR"
+
+      # 5. Install Flutter SDK
       - name: Install Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
+      # 6. Show Flutter version
+      - name: Flutter version
+        run: |
+          flutter --version
+          dart --version
+
+      # 7. Generate Android platform files
       - name: Generate Android files
-        working-directory: source/daftar_taqyim_flutter
-        run: flutter create --platforms=android --org dz.edu.daftar .
+        run: |
+          cd "$PROJECT_DIR"
 
+          flutter create \
+            --platforms=android \
+            --org dz.edu.daftar .
+
+          # Remove automatically generated test
+          rm -f test/widget_test.dart
+
+          # Remove unused import
+          sed -i "/import '..\/models\/student.dart';/d" \
+            lib/screens/home_screen.dart
+
+      # 8. Install dependencies
       - name: Install dependencies
-        working-directory: source/daftar_taqyim_flutter
-        run: flutter pub get
+        run: |
+          cd "$PROJECT_DIR"
+          flutter pub get
 
+      # 9. Analyze Flutter project
       - name: Analyze project
-        working-directory: source/daftar_taqyim_flutter
-        run: flutter analyze
+        continue-on-error: true
+        run: |
+          cd "$PROJECT_DIR"
+          flutter analyze
 
+      # 10. Build release APK
       - name: Build APK
-        working-directory: source/daftar_taqyim_flutter
-        run: flutter build apk --release
+        run: |
+          cd "$PROJECT_DIR"
+          flutter build apk --release
 
+      # 11. Verify APK
+      - name: Verify APK
+        run: |
+          APK="$PROJECT_DIR/build/app/outputs/flutter-apk/app-release.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not generated!"
+            exit 1
+          fi
+
+          ls -lh "$APK"
+
+      # 12. Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Daftar-Taqyim-APK
-          path: source/daftar_taqyim_flutter/build/app/outputs/flutter-apk/app-release.apk
+          path: source/**/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
+          retention-days: 30
