@@ -1,0 +1,148 @@
+
+name: Build Daftar Taqyim APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'daftar_taqyim_flutter_source.zip'
+      - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify ZIP archive
+        run: |
+          test -f daftar_taqyim_flutter_source.zip
+          unzip -t daftar_taqyim_flutter_source.zip
+
+      - name: Extract Flutter project
+        run: |
+          mkdir -p source
+          unzip -q daftar_taqyim_flutter_source.zip -d source
+
+      - name: Locate Flutter project
+        run: |
+          PROJECT_FILE=$(find source -name pubspec.yaml -print -quit)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: pubspec.yaml not found"
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$(dirname "$PROJECT_FILE")" >> "$GITHUB_ENV"
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Check Flutter
+        run: |
+          flutter --version
+          dart --version
+
+      - name: Generate Android files
+        run: |
+          cd "$PROJECT_DIR"
+
+          flutter create \
+            --platforms=android \
+            --org dz.edu.daftar .
+
+          rm -f test/widget_test.dart
+
+          sed -i "/import '..\/models\/student.dart';/d" \
+            lib/screens/home_screen.dart
+
+      - name: Configure Android SDK 36
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("source")
+          files = list(root.glob("**/android/app/build.gradle.kts"))
+          files += list(root.glob("**/android/app/build.gradle"))
+
+          if not files:
+              raise SystemExit("Android app Gradle file not found")
+
+          for path in files:
+              content = path.read_text()
+              original = content
+
+              content = content.replace(
+                  "compileSdk = flutter.compileSdkVersion",
+                  "compileSdk = 36"
+              )
+
+              content = content.replace(
+                  "compileSdkVersion flutter.compileSdkVersion",
+                  "compileSdkVersion 36"
+              )
+
+              content = content.replace(
+                  "compileSdk flutter.compileSdkVersion",
+                  "compileSdk 36"
+              )
+
+              if content == original and "compileSdk = 36" not in content:
+                  import re
+                  content, count = re.subn(
+                      r"compileSdk\s*=\s*\d+",
+                      "compileSdk = 36",
+                      content
+                  )
+                  if count == 0:
+                      raise SystemExit(
+                          f"Could not update compileSdk in {path}"
+                      )
+
+              path.write_text(content)
+              print(f"Updated: {path}")
+          PY
+
+      - name: Install dependencies
+        run: |
+          cd "$PROJECT_DIR"
+          flutter pub get
+
+      - name: Analyze project
+        continue-on-error: true
+        run: |
+          cd "$PROJECT_DIR"
+          flutter analyze
+
+      - name: Build release APK
+        run: |
+          cd "$PROJECT_DIR"
+          flutter build apk --release
+
+      - name: Verify APK
+        run: |
+          APK="$PROJECT_DIR/build/app/outputs/flutter-apk/app-release.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "APK NOT FOUND"
+            exit 1
+          fi
+
+          ls -lh "$APK"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Daftar-Taqyim-APK
+          path: source/**/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
